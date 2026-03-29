@@ -14,16 +14,20 @@ API_CONTAINER  := message-board-api
 prereqs:
 	@echo "==> Checking / installing kind $(KIND_VERSION)..."
 	@if ! command -v kind &>/dev/null; then \
-		curl -sLo $(KIND_BIN) \
+		TMP=$$(mktemp) && \
+		curl -sLo "$$TMP" \
 		  "https://kind.sigs.k8s.io/dl/$(KIND_VERSION)/kind-linux-amd64" && \
-		chmod +x $(KIND_BIN) && echo "  kind installed"; \
+		chmod +x "$$TMP" && \
+		sudo mv "$$TMP" $(KIND_BIN) && echo "  kind installed"; \
 	else echo "  kind already present: $$(kind version)"; fi
 
 	@echo "==> Checking / installing kubectl $(KUBECTL_VERSION)..."
 	@if ! command -v kubectl &>/dev/null; then \
-		curl -sLo $(KUBECTL_BIN) \
+		TMP=$$(mktemp) && \
+		curl -sLo "$$TMP" \
 		  "https://dl.k8s.io/release/$(KUBECTL_VERSION)/bin/linux/amd64/kubectl" && \
-		chmod +x $(KUBECTL_BIN) && echo "  kubectl installed"; \
+		chmod +x "$$TMP" && \
+		sudo mv "$$TMP" $(KUBECTL_BIN) && echo "  kubectl installed"; \
 	else echo "  kubectl already present: $$(kubectl version --client --short 2>/dev/null || kubectl version --client)"; fi
 
 # ──────────────────────────────────────────────────────────────────────────────
