@@ -344,7 +344,59 @@ Om en ny claim skapas nu — tilldelas primtal 3 igen.
 
 ---
 
-## Steg 10 — Controller-loggar
+## Steg 10 — Reconciliation loop: simulera drift
+
+Controllern tittar var **10:e sekund** på om primtalet fortfarande finns i API:et.
+Öppna UI:t och klicka **Release** på en allokerad rad — primtalet försvinner direkt.
+
+```bash
+# Bevaka controllerloggar live i en separat terminal
+kubectl logs -n demo -l app=prime-controller -f
+```
+
+Vad du ser i loggarna (~10 s efter Release):
+
+```
+[WARNING] DRIFT DETECTED: prime 2 for 'team-alpha' is gone from API — healing
+[INFO]    Healed: re-allocated prime 2 to 'team-alpha'
+```
+
+Kubernetes-objektet ändrades **aldrig** — CR:en sa hela tiden att primtalet skulle finnas.
+Controllern märkte avvikelsen och återställde faktiskt tillstånd.
+
+---
+
+## Flödet i detalj — drift & healing
+
+```
+[UI] Klicka Release på prime 2
+        │
+        ▼
+  DELETE http://prime-api:8080/primes/2   (direkt, utan kubectl)
+        │  PrimeClaim claim-alpha är ORÖRD i etcd
+        ▼
+  kopf on_timer() triggas (var 10 s)
+        │
+        ▼
+  GET /primes → {allocations: [...]}  ← prime 2 saknas!
+        │
+        ▼
+  DRIFT DETECTED — POST /primes {"requester":"team-alpha"}
+        │
+        ▼
+  API svarar: {"prime": 2, ...}
+        │
+        ▼
+  patch.status["prime"] = 2
+  patch.status["lastSyncTime"] = <nu>
+        │
+        ▼
+  Faktiskt tillstånd = önskat tillstånd ✓
+```
+
+---
+
+## Steg 11 — Controller-loggar
 
 Loggar visar hela händelsekedjan:
 
@@ -370,7 +422,7 @@ Released prime 3
 
 ---
 
-## Steg 11 — Felsökning
+## Steg 12 — Felsökning
 
 ```bash
 # Beskriver CR:ens events (kopf skriver Kubernetes-events)
@@ -496,6 +548,7 @@ make teardown
 | **CR** | En instans — det önskade tillståndet (`requester: team-alpha`) |
 | **kopf** | Python-framework som kopplar Watch-events till handlers |
 | **Controller** | Allokerar/frigör primtal mot externa API:et |
+| **Timer** | Kör var 10 s, detekterar drift och healar automatiskt |
 | **Status** | Speglar faktiskt tillstånd (`prime: 2`) tillbaka i Kubernetes |
 
 > Kubernetes blir ett **enhetligt kontrollplan** — inte bara för containers.

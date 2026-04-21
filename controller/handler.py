@@ -42,6 +42,53 @@ def on_create(spec, patch, logger, **kwargs):
 
 
 # ---------------------------------------------------------------------------
+# TIMER — detect drift every 10 s and heal
+# ---------------------------------------------------------------------------
+@kopf.on.timer("demo.example.com", "v1", "primeclaims", interval=10.0, initial_delay=5.0)
+def on_timer(spec, status, patch, logger, **kwargs):
+    prime = status.get("prime")
+    if not prime or status.get("phase") != "Allocated":
+        return
+
+    requester = spec["requester"]
+
+    try:
+        resp = httpx.get(_api_url("/primes"), timeout=10)
+        resp.raise_for_status()
+    except httpx.RequestError as exc:
+        logger.warning(f"Drift check skipped — cannot reach API: {exc}")
+        return
+
+    allocated = {a["prime"] for a in resp.json()["allocations"]}
+
+    if prime not in allocated:
+        logger.warning(
+            f"DRIFT DETECTED: prime {prime} for '{requester}' is gone from API — healing"
+        )
+        try:
+            resp = httpx.post(
+                _api_url("/primes"), json={"requester": requester}, timeout=10
+            )
+            resp.raise_for_status()
+        except httpx.RequestError as exc:
+            patch.status["phase"] = "Error"
+            patch.status["error"] = str(exc)
+            patch.status["lastSyncTime"] = _now()
+            raise kopf.TemporaryError(str(exc), delay=15)
+
+        data = resp.json()
+        patch.status["phase"] = "Allocated"
+        patch.status["prime"] = data["prime"]
+        patch.status["lastSyncTime"] = _now()
+        patch.status["error"] = ""
+        logger.info(
+            f"Healed: re-allocated prime {data['prime']} to '{requester}'"
+        )
+    else:
+        logger.debug(f"Drift check OK: prime {prime} still held by '{requester}'")
+
+
+# ---------------------------------------------------------------------------
 # DELETE — release the prime back to the pool
 # ---------------------------------------------------------------------------
 @kopf.on.delete("demo.example.com", "v1", "primeclaims")

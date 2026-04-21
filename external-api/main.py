@@ -421,6 +421,37 @@ main {
   color: var(--text-dim);
 }
 
+.release-btn {
+  background: none;
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.release-btn:hover {
+  background: var(--warn);
+  color: var(--white);
+}
+
+.drift-banner {
+  display: none;
+  background: #fff3f2;
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 10px 20px;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
 /* ── Footer ──────────────────────────────────────── */
 footer {
   background: var(--white);
@@ -472,6 +503,10 @@ footer {
 </div>
 
 <main>
+  <div class="drift-banner" id="drift-banner">
+    &#9888; Drift introduced — prime released outside Kubernetes. Waiting for controller to heal...
+  </div>
+
   <div class="stats">
     <div class="stat">
       <div class="stat-label">Allocated</div>
@@ -510,6 +545,7 @@ footer {
           <th>Prime</th>
           <th>Refinement Unit</th>
           <th>Status</th>
+          <th>Simulate Drift</th>
         </tr>
       </thead>
       <tbody id="tbody"></tbody>
@@ -584,8 +620,21 @@ async function refresh() {
           <td><span class="prime-num">${a.prime}</span></td>
           <td><span class="req-name">${a.requester}</span></td>
           <td><span class="status-chip">Allocated</span></td>
+          <td><button class="release-btn" onclick="releaseManually(${a.prime})">Release</button></td>
         </tr>`).join('');
     }
+  } catch(e) { console.error(e); }
+}
+
+async function releaseManually(prime) {
+  if (!confirm(`Release prime ${prime} directly from the API — bypassing Kubernetes?\\nThe controller should detect drift and re-allocate within ~10 seconds.`)) return;
+  try {
+    await fetch('/primes/' + prime, { method: 'DELETE' });
+    document.getElementById('drift-banner').style.display = 'block';
+    setTimeout(() => {
+      document.getElementById('drift-banner').style.display = 'none';
+    }, 15000);
+    await refresh();
   } catch(e) { console.error(e); }
 }
 
