@@ -24,7 +24,7 @@ pause
 
 # ── 2. External API + open dashboard ────────────────────────────────────────
 step "Step 2 — Prime API health check + dashboard"
-info "The FastAPI prime reservation service runs OUTSIDE the kind cluster as a plain Docker container."
+info "The FastAPI prime reservation service runs OUTSIDE the kind cluster as a plain container."
 curl -s http://localhost:8080/ | python3 -m json.tool
 echo ""
 ok "Dashboard available at: http://localhost:8080/ui"

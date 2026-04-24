@@ -7,6 +7,19 @@ KUBECTL_BIN     := /usr/local/bin/kubectl
 CLUSTER_NAME    := demo-cluster
 NETWORK_NAME    := demo-net
 API_CONTAINER   := prime-api
+CONTROLLER_IMAGE := localhost/prime-controller:latest
+CONTAINER_ENGINE ?= docker
+KIND_PROVIDER    ?=
+
+ifeq ($(strip $(KIND_PROVIDER)),)
+ifneq ($(filter podman,$(CONTAINER_ENGINE)),)
+KIND_PROVIDER := podman
+endif
+endif
+
+ifneq ($(strip $(KIND_PROVIDER)),)
+KIND_PROVIDER_ENV := KIND_EXPERIMENTAL_PROVIDER=$(KIND_PROVIDER)
+endif
 
 # ──────────────────────────────────────────────────────────────────────────────
 # prereqs: download kind and kubectl if not already installed
@@ -31,28 +44,28 @@ prereqs:
 	else echo "  kubectl already present: $$(kubectl version --client --short 2>/dev/null || kubectl version --client)"; fi
 
 # ──────────────────────────────────────────────────────────────────────────────
-# build: build both Docker images
+# build: build both container images
 # ──────────────────────────────────────────────────────────────────────────────
 build:
-	@echo "==> Building prime-api image..."
-	docker build -t prime-api:latest ./external-api
-	@echo "==> Building prime-controller image..."
-	docker build -t prime-controller:latest ./controller
+	@echo "==> Building prime-api image with $(CONTAINER_ENGINE)..."
+	$(CONTAINER_ENGINE) build -t prime-api:latest ./external-api
+	@echo "==> Building prime-controller image with $(CONTAINER_ENGINE)..."
+	$(CONTAINER_ENGINE) build -t prime-controller:latest -t $(CONTROLLER_IMAGE) ./controller
 
 # ──────────────────────────────────────────────────────────────────────────────
 # setup: create network, start external API, create kind cluster, connect net
 # ──────────────────────────────────────────────────────────────────────────────
 setup:
-	@echo "==> Creating Docker network '$(NETWORK_NAME)'..."
-	@docker network inspect $(NETWORK_NAME) &>/dev/null || \
-	  docker network create $(NETWORK_NAME)
+	@echo "==> Creating $(CONTAINER_ENGINE) network '$(NETWORK_NAME)'..."
+	@$(CONTAINER_ENGINE) network inspect $(NETWORK_NAME) &>/dev/null || \
+	  $(CONTAINER_ENGINE) network create $(NETWORK_NAME)
 
 	@echo "==> Starting prime-api container..."
-	@if docker ps -a --format '{{.Names}}' | grep -q '^$(API_CONTAINER)$$'; then \
+	@if $(CONTAINER_ENGINE) ps -a --format '{{.Names}}' | grep -q '^$(API_CONTAINER)$$'; then \
 	  echo "  Container '$(API_CONTAINER)' already exists — removing..."; \
-	  docker rm -f $(API_CONTAINER); \
+	  $(CONTAINER_ENGINE) rm -f $(API_CONTAINER); \
 	fi
-	docker run -d \
+	$(CONTAINER_ENGINE) run -d \
 	  --name $(API_CONTAINER) \
 	  --network $(NETWORK_NAME) \
 	  -p 8080:8080 \
@@ -64,14 +77,14 @@ setup:
 	  fi; sleep 1; done
 
 	@echo "==> Creating kind cluster '$(CLUSTER_NAME)'..."
-	@if kind get clusters 2>/dev/null | grep -q '^$(CLUSTER_NAME)$$'; then \
+	@if $(KIND_PROVIDER_ENV) kind get clusters 2>/dev/null | grep -q '^$(CLUSTER_NAME)$$'; then \
 	  echo "  Cluster already exists — skipping."; \
 	else \
-	  kind create cluster --config kind/cluster.yaml; \
+	  $(KIND_PROVIDER_ENV) kind create cluster --config kind/cluster.yaml; \
 	fi
 
 	@echo "==> Connecting kind control-plane to demo-net..."
-	@docker network connect $(NETWORK_NAME) $(CLUSTER_NAME)-control-plane 2>/dev/null || \
+	@$(CONTAINER_ENGINE) network connect $(NETWORK_NAME) $(CLUSTER_NAME)-control-plane 2>/dev/null || \
 	  echo "  Already connected."
 
 	@echo "==> Setup complete."
@@ -81,7 +94,14 @@ setup:
 # ──────────────────────────────────────────────────────────────────────────────
 load:
 	@echo "==> Loading prime-controller image into kind..."
-	kind load docker-image prime-controller:latest --name $(CLUSTER_NAME)
+ifeq ($(KIND_PROVIDER),podman)
+	@TMP_ARCHIVE=$$(mktemp /tmp/prime-controller-image.XXXXXX.tar); \
+	  trap 'rm -f "$$TMP_ARCHIVE"' EXIT; \
+	  $(CONTAINER_ENGINE) save --format docker-archive -o "$$TMP_ARCHIVE" $(CONTROLLER_IMAGE); \
+	  $(KIND_PROVIDER_ENV) kind load image-archive "$$TMP_ARCHIVE" --name $(CLUSTER_NAME)
+else
+	$(KIND_PROVIDER_ENV) kind load docker-image $(CONTROLLER_IMAGE) --name $(CLUSTER_NAME)
+endif
 
 # ──────────────────────────────────────────────────────────────────────────────
 # deploy: apply manifests and wait for rollout
@@ -121,9 +141,9 @@ status:
 # ──────────────────────────────────────────────────────────────────────────────
 teardown:
 	@echo "==> Deleting kind cluster..."
-	kind delete cluster --name $(CLUSTER_NAME) || true
+	$(KIND_PROVIDER_ENV) kind delete cluster --name $(CLUSTER_NAME) || true
 	@echo "==> Stopping prime-api container..."
-	docker rm -f $(API_CONTAINER) || true
+	$(CONTAINER_ENGINE) rm -f $(API_CONTAINER) || true
 	@echo "==> Removing network..."
-	docker network rm $(NETWORK_NAME) || true
+	$(CONTAINER_ENGINE) network rm $(NETWORK_NAME) || true
 	@echo "==> Teardown complete."

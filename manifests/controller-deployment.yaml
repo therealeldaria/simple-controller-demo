@@ -16,7 +16,7 @@ spec:
       serviceAccountName: prime-controller
       containers:
         - name: controller
-          image: prime-controller:latest
+          image: localhost/prime-controller:latest
           imagePullPolicy: Never
           env:
             - name: PRIME_API_URL

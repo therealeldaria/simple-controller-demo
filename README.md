@@ -7,7 +7,7 @@ A custom `PrimeClaim` resource is defined via a CRD. A [kopf](https://kopf.readt
 ```
 ┌─────────────────────────────────────┐      HTTP       ┌───────────────────────┐
 │          kind cluster               │  ────────────▶  │  FastAPI prime        │
-│                                     │                 │  allocator (Docker)   │
+│                                     │                 │  allocator (Container)│
 │  kubectl apply prime-alpha.yaml     │                 │                       │
 │          │                          │                 │  POST /primes         │
 │          ▼                          │                 │  DELETE /primes/{n}   │
@@ -19,7 +19,7 @@ A custom `PrimeClaim` resource is defined via a CRD. A [kopf](https://kopf.readt
 
 ## Prerequisites
 
-- Docker
+- Docker or Podman
 - `make`
 - `curl`
 
@@ -38,6 +38,26 @@ make deploy    # apply CRD, RBAC, Deployment; wait for rollout
 ./demo.sh      # interactive walkthrough
 make teardown  # clean up everything
 ```
+
+### Podman quick start
+
+The default targets still use Docker. To run the same flow with Podman, set `CONTAINER_ENGINE=podman`. The Makefile will also switch Kind to the Podman provider automatically:
+
+```bash
+make prereqs
+make CONTAINER_ENGINE=podman build
+make CONTAINER_ENGINE=podman setup
+make CONTAINER_ENGINE=podman load
+make deploy
+./demo.sh
+make CONTAINER_ENGINE=podman teardown
+```
+
+You can still override Kind directly with `KIND_PROVIDER=podman` if needed. If you use rootless Podman, Kind documents extra host setup requirements for fully functional clusters:
+- https://kind.sigs.k8s.io/docs/user/quick-start/
+- https://kind.sigs.k8s.io/docs/user/rootless/
+
+For image loading, the controller image is tagged as `localhost/prime-controller:latest`. The Podman path uses `podman save` plus `kind load image-archive`. Kind documents `image-archive` as a supported load mechanism, and Podman documents `save` producing a `docker-archive`, which avoids local image lookup issues with the experimental Podman provider.
 
 ---
 
@@ -99,7 +119,7 @@ The controller writes back to `.status`:
 
 ## External API
 
-The FastAPI service runs as a plain Docker container on port **8080**, outside the kind cluster.
+The FastAPI service runs as a plain container on port **8080**, outside the kind cluster.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -118,14 +138,14 @@ The controller runs a timer every **10 seconds**. If a prime that should be allo
 
 ## Networking
 
-The controller Pod (inside kind) reaches the external container via a shared Docker network:
+The controller Pod (inside kind) reaches the external container via a shared container network:
 
-1. `docker network create demo-net`
-2. External API starts on `demo-net` with `--name prime-allocator-api`
-3. `docker network connect demo-net demo-cluster-control-plane`
-4. Docker's embedded DNS resolves `prime-allocator-api` by name inside `demo-net`
+1. `docker network create demo-net` or `podman network create demo-net`
+2. External API starts on `demo-net` with `--name prime-api`
+3. `docker network connect demo-net demo-cluster-control-plane` or `podman network connect demo-net demo-cluster-control-plane`
+4. The container engine's embedded DNS resolves `prime-api` by name inside `demo-net`
 
-The controller Deployment sets `PRIME_API_URL=http://prime-allocator-api:8080`. Pod DNS for non-cluster names falls through to the node's `resolv.conf`, which now has access to `demo-net`.
+The controller Deployment sets `PRIME_API_URL=http://prime-api:8080`. Pod DNS for non-cluster names falls through to the node's `resolv.conf`, which now has access to `demo-net`.
 
 ---
 
@@ -134,11 +154,11 @@ The controller Deployment sets `PRIME_API_URL=http://prime-allocator-api:8080`. 
 | Target | Action |
 |---|---|
 | `make prereqs` | Download kind + kubectl to `/usr/local/bin` |
-| `make build` | Build both Docker images |
+| `make build` | Build both container images; override with `CONTAINER_ENGINE=podman` |
 | `make setup` | Create demo-net, start external API, create kind cluster, connect network |
-| `make load` | Load controller image into kind via `kind load docker-image` |
+| `make load` | Load controller image into kind; the Podman path uses an image archive instead of direct local-image lookup |
 | `make deploy` | Apply all manifests; wait for CRD + controller rollout |
 | `make demo` | Run `./demo.sh` |
 | `make logs` | Tail controller logs |
 | `make status` | `kubectl get primeclaims -n demo` |
-| `make teardown` | Delete cluster, stop containers, remove network |
+| `make teardown` | Delete cluster, stop the external API container, remove network |
